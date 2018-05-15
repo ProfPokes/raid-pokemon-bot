@@ -39,30 +39,24 @@ $content = file_get_contents('php://input');
 
 // Decode the json string.
 $update = json_decode($content, true);
+
+// Get language from user - otherwise use language from config.
 if (LANGUAGE == '') {
-  
-  $language = $update['message']['from']['language_code'];
-  if ($language=='') {
-    
-    $language = $update['callback_query']['from']['language_code'];
-  }
+    // Message or callback?
+    if(isset($update['message']['from']['language_code'])) {
+        $language_code = $update['message']['from']['language_code'];
+    } else if(isset($update['callback_query']['from']['language_code'])) {
+        $language_code = $update['callback_query']['from']['language_code'];
+    } else {
+        $language_code = LANGUAGE;
+    }
 
-  if (strpos($language,'de') === 0) {
-
-    define('USERLANGUAGE', 'DE'); 
-  }
-  else if (strpos($language,'nl') === 0) {
-
-    define('USERLANGUAGE', 'NL');
-  }
-  else if (strpos($language,'pt') === 0) {
-
-    define('USERLANGUAGE', 'PT-BR');
-  }
-  else {
-
-    define('USERLANGUAGE', 'EN');
-  }
+    // Get and define userlanguage.
+    $userlanguage = get_user_language($language_code);
+    define('USERLANGUAGE', $userlanguage);
+} else {
+    // Set user language to language from config.
+    define('USERLANGUAGE', LANGUAGE);
 }
 
 // Update var is false.
@@ -107,9 +101,17 @@ if (isset($update['cleanup']) && CLEANUP == true) {
 	} else {
 	    $database = 2;
 	}
-        // Run cleanup
-        cleanup_log('Calling cleanup process now!');
-        run_cleanup($telegram, $database);
+        // Run cleanup based on type
+        $cleanup_type = $update['cleanup']['type'];
+        cleanup_log('Calling ' . $cleanup_type . ' cleanup process now!');
+        // Raids cleanup
+        if ($cleanup_type == 'raid') {
+            run_raids_cleanup($telegram, $database);
+        } else if ($cleanup_type == 'quest') {
+            run_quests_cleanup($telegram, $database);
+        } else {
+            cleanup_log('Error! Wrong cleanup type supplied!', '!');
+        }
     } else {
         cleanup_log('Error! Wrong cleanup secret supplied!', '!');
     }
@@ -171,16 +173,28 @@ if (isset($update['callback_query'])) {
 } else if (isset($update['message']['location'])) {
     // Check access to the bot
     bot_access_check($update);
+
+    // Ask what to create.
+    if(RAID_VIA_LOCATION == true && QUEST_VIA_LOCATION == true) {
+        include_once(ROOT_PATH . '/modules/geo_create.php');
+
     // Create raid and exit.
-    include_once(ROOT_PATH . '/modules/raid_create.php');
+    } else if(RAID_VIA_LOCATION == true && QUEST_VIA_LOCATION == false) {
+        include_once(ROOT_PATH . '/modules/raid_create.php');
+
+    // Create quest and exit.
+    } else if(RAID_VIA_LOCATION == false && QUEST_VIA_LOCATION == true) {
+        include_once(ROOT_PATH . '/modules/quest_geo.php');
+    }
     exit();
 
 // Cleanup collection from channel/supergroup messages.
-} else if (isset($update['channel_post']['chat']['type']) && ($update['channel_post']['chat']['type'] == "channel" || $update['message']['chat']['type'] == "supergroup")) {
+} else if ((isset($update['channel_post']) && $update['channel_post']['chat']['type'] == "channel") || (isset($update['message']) && $update['message']['chat']['type'] == "supergroup")) {
     // Write to log.
     debug_log('Collecting cleanup preparation information...');
-    // Init raid_id.
+    // Init raid_id and quest_id.
     $raid_id = 0;
+    $quest_id = 0;
 
     // Channel 
     if(isset($update['channel_post'])) {
@@ -188,8 +202,19 @@ if (isset($update['callback_query'])) {
         $chat_id = $update['channel_post']['chat']['id'];
         $message_id = $update['channel_post']['message_id'];
 
+        // Get ID type (raid or quest) to get ID afterwards.
+        $id_pos = strrpos($update['channel_post']['text'], '-ID = ');
+        $id_type = ($id_pos === false) ? ('0') : (substr($update['channel_post']['text'], ($id_pos - 1), 1));
+
 	// Get raid_id from text.
-        $raid_id = substr(strrchr($update['channel_post']['text'], "ID = "), 5);
+        if($id_type == 'R') {
+            $raid_id = substr(strrchr($update['channel_post']['text'], 'R-ID = '), 7);
+        }
+
+        // Get quest_id from text.
+        if($id_type == 'Q') {
+            $quest_id = substr(strrchr($update['channel_post']['text'], 'Q-ID = '), 7);
+        }
 
     // Supergroup
     } else if ($update['message']['chat']['type'] == "supergroup") {
@@ -197,13 +222,28 @@ if (isset($update['callback_query'])) {
         $chat_id = $update['message']['chat']['id'];
         $message_id = $update['message']['message_id'];
 
-	// Get raid_id from text.
-        $raid_id = substr(strrchr($update['message']['text'], "ID = "), 5);
+        // Get ID type (raid or quest) to get ID afterwards.
+        $id_pos = strrpos($update['message']['text'], '-ID = ');
+        $id_type = ($id_pos === false) ? ('0') : (substr($update['message']['text'], ($id_pos - 1), 1));
+
+        // Get raid_id from text.
+        if($id_type == 'R') {
+            $raid_id = substr(strrchr($update['message']['text'], 'R-ID = '), 7);
+        }
+
+        // Get quest_id from text.
+        if($id_type == 'Q') {
+            $quest_id = substr(strrchr($update['message']['text'], 'Q-ID = '), 7);
+        }
     }
 
     // Write cleanup info to database.
     debug_log('Calling cleanup preparation now!');
-    insert_cleanup($chat_id, $message_id, $raid_id);
+    if($raid_id != 0) {
+        insert_raid_cleanup($chat_id, $message_id, $raid_id);
+    } else if($quest_id != 0) {
+        insert_quest_cleanup($chat_id, $message_id, $quest_id);
+    }
     exit();
 
 // Message is required to check for commands.

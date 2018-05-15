@@ -222,11 +222,38 @@ function answerInlineQuery($query_id, $contents)
 
     // For each content.
     foreach ($contents as $key => $row) {
-        // Get raid poll.
-        $text = show_raid_poll($row);
+        // Raid
+        if(isset($row['iqq_raid_id'])) {
+            // Get raid poll.
+            $text = show_raid_poll($row);
 
-        // Get inline keyboard.
-        $inline_keyboard = keys_vote($row);
+            // Get inline keyboard.
+            $inline_keyboard = keys_vote($row);
+
+            // Set the title.
+            $title = get_local_pokemon_name($row['pokemon']) . ' ' . getTranslation('from') . ' ' . unix2tz($row['ts_start'], $row['timezone'])  . ' ' . getTranslation('to') . ' ' . unix2tz($row['ts_end'], $row['timezone']);
+
+            // Set the description.
+            $desc = strval($row['gym_name']);
+
+        // Quest
+        } else if(isset($row['iqq_quest_id'])) {
+            // Get the quest.
+            $quest = get_quest($row['iqq_quest_id']);
+
+            // Set the text.
+            $text = get_formatted_quest($quest, true, true, false, true);
+
+            // Set the title.
+            $title = $quest['pokestop_name'];
+
+            // Set the inline keyboard.
+            $inline_keyboard = [];
+
+            // Set the description.
+            $desc = get_formatted_quest($quest, false, false, true, false);
+        }
+
 
         // Create input message content array.
         $input_message_content = [
@@ -239,8 +266,8 @@ function answerInlineQuery($query_id, $contents)
         $results[] = [
             'type'                  => 'article',
             'id'                    => $query_id . $key,
-            'title'                 => get_local_pokemon_name($row['pokemon']) . ' ' . getTranslation('from') . ' ' . unix2tz($row['ts_start'], $row['timezone'])  . ' ' . getTranslation('to') . ' ' . unix2tz($row['ts_end'], $row['timezone']),
-            'description'           => strval($row['gym_name']),
+            'title'                 => $title,
+            'description'           => $desc,
             'input_message_content' => $input_message_content,
             'reply_markup'          => [
                 'inline_keyboard' => $inline_keyboard
@@ -431,7 +458,7 @@ function delete_message($chat_id, $message_id)
 
 /**
  * GetChat
- * @param $chatid
+ * @param $chat_id
  */
 function get_chat($chat_id)
 {
@@ -457,7 +484,7 @@ function get_chat($chat_id)
 
 /**
  * GetChatAdministrators
- * @param $chatid
+ * @param $chat_id
  */
 function get_admins($chat_id)
 {
@@ -465,6 +492,34 @@ function get_admins($chat_id)
     $reply_content = [
         'method'     => 'getChatAdministrators',
         'chat_id'    => $chat_id,
+        'parse_mode' => 'HTML',
+    ];
+
+    // Encode data to json.
+    $reply_json = json_encode($reply_content);
+
+    // Set header to json.
+    header('Content-Type: application/json');
+
+    // Write to log.
+    debug_log($reply_json, '>');
+
+    // Send request to telegram api.
+    return curl_json_request($reply_json);
+}
+
+/**
+ * GetChatMember
+ * @param $chat_id
+ * @param $user_id
+ */
+function get_chatmember($chat_id, $user_id)
+{
+    // Create response content array.
+    $reply_content = [
+        'method'     => 'getChatMember',
+        'chat_id'    => $chat_id,
+        'user_id'    => $user_id,
         'parse_mode' => 'HTML',
     ];
 
@@ -522,14 +577,15 @@ function curl_json_request($json)
     } else {
 	// Result seems ok, get message_id and chat_id if supergroup or channel message
 	if (isset($response['result']['chat']['type']) && ($response['result']['chat']['type'] == "channel" || $response['result']['chat']['type'] == "supergroup")) {
-            // Init raid_id
+            // Init raid_id and quest_id
             $raid_id = 0;
+            $quest_id = 0;
 
 	    // Set chat and message_id
             $chat_id = $response['result']['chat']['id'];
             $message_id = $response['result']['message_id'];
 
-            // Get raid id from $json
+            // Get raid/quest id from $json
             $json_message = json_decode($json, true);
 
             // Write to log that message was shared with channel or supergroup
@@ -541,23 +597,37 @@ function curl_json_request($json)
                 $split_callback_data = explode(':', $json_message['reply_markup']['inline_keyboard']['0']['0']['callback_data']);
                 $raid_id = $split_callback_data[0];
 
-            // Check if it's a venue and get raid id
+            // Check if it's a venue and get raid/quest id
             } else if (!empty($response['result']['venue']['address'])) {
                 // Get raid_id from address.
-                $raid_id = substr(strrchr($response['result']['venue']['address'], "ID = "), 5);
+                $raid_id = substr(strrchr($response['result']['venue']['address'], 'R-ID = '), 7);
+                $quest_id = substr(strrchr($response['result']['venue']['address'], 'Q-ID = '), 7);
+
+            // Check if it's a text and get quest id
+            } else if (!empty($response['result']['text'])) {
+                $quest_id = substr(strrchr($response['result']['text'], "Q-ID = "), 7);
             }
 
-            // Trigger Cleanup when raid_id was found
-            if ($raid_id != 0) {
-                debug_log('Found Raid_ID for cleanup preparation from callback_data or venue!');
-                debug_log('Raid_ID: ' . $raid_id);
+            // Trigger Cleanup when raid_id/quest was found
+            if ($raid_id != 0 || $quest_id != 0) {
+                if($raid_id != 0) {
+                    debug_log('Found Raid_ID for cleanup preparation from callback_data or venue!');
+                    debug_log('Raid_ID: ' . $raid_id);
+                } else if($quest_id != 0) {
+                    debug_log('Found Quest_ID for cleanup preparation from callback_data or venue!');
+                    debug_log('Quest_ID: ' . $quest_id);
+                }
                 debug_log('Chat_ID: ' . $chat_id);
                 debug_log('Message_ID: ' . $message_id);
 
-	        // Trigger cleanup preparation process when necessary id's are not empty and numeric
+	        // Trigger raid cleanup preparation process when necessary id's are not empty and numeric
 	        if (!empty($chat_id) && !empty($message_id) && !empty($raid_id)) {
 		    debug_log('Calling cleanup preparation now!');
-		    insert_cleanup($chat_id, $message_id, $raid_id);
+		    insert_raid_cleanup($chat_id, $message_id, $raid_id);
+	        // Trigger quest cleanup preparation process when necessary id's are not empty and numeric
+	        } else if(!empty($chat_id) && !empty($message_id) && !empty($quest_id)) {
+		    debug_log('Calling cleanup preparation now!');
+		    insert_quest_cleanup($chat_id, $message_id, $quest_id);
 	        } else {
 		    debug_log('Missing input! Cannot call cleanup preparation!');
 		}
@@ -586,22 +656,50 @@ function curl_json_request($json)
 }
 
 /**
- * Gets a table translation out of the json file.
+ * Call the translation function with override parameters for raid polls.
  * @param $text
  * @return translation
  */
-function getTranslation($text)
+function getRaidTranslation($text)
+{
+    $translation = getTranslation($text, true, RAID_POLL_LANGUAGE);
+
+    return $translation;
+}
+
+/**
+ * Call the translation function with override parameters for quests.
+ * @param $text
+ * @return translation
+ */
+function getQuestTranslation($text)
+{
+    $translation = getTranslation($text, true, QUEST_LANGUAGE);
+
+    return $translation;
+}
+
+/**
+ * Gets a table translation out of the json file.
+ * @param $text
+ * @param $override
+ * @param $override_language
+ * @return translation
+ */
+function getTranslation($text, $override = false, $override_language = USERLANGUAGE)
 {
     debug_log($text,'T:');
     $translation = '';
 
-    $language = LANGUAGE;
-    if ($language=='') {
-      
-      $language = USERLANGUAGE;
+    // Set language
+    $language = USERLANGUAGE;
+
+    // Override language?
+    if($override == true && $override_language != '') {
+        $language = $override_language;
     }
 
-    // Pokemon name or other translation?
+    // Pokemon name?
     if(strpos($text, 'pokemon_id_') === 0) {
         // Make sure file exists
         if(file_exists(ROOT_PATH . '/pokemon_' . strtolower($language) . '.json')) {
@@ -613,15 +711,18 @@ function getTranslation($text)
             $json = json_decode($str, true);
             $translation = $json[$pokemon_id - 1];
         }
+    // Quest or reward text?
+    } else if(strpos($text, 'quest_type_') === 0 || strpos($text, 'quest_action_') === 0 || strpos($text, 'reward_type_') === 0) {
+        $str = file_get_contents(ROOT_PATH . '/quests-rewards.json');
+
+        $json = json_decode($str, true);
+        $translation = $json[$text][$language];
+    // Other translation
     } else {
         $str = file_get_contents(ROOT_PATH . '/language.json');
 
         $json = json_decode($str, true);
         $translation = $json[$text][$language];
-        if ($translation=='') {
-          
-          $translation = $json[$text]['EN'];
-        }
     }
 
     return $translation;

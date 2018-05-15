@@ -5,6 +5,16 @@ define('ROOT_PATH', __DIR__);
 // Carriage return.
 define('CR',  "\n");
 define('CR2', "\n");
+// Space.
+define('SP', " ");
+
+// Languages.
+$languages = array(
+    'nl' => 'NL',
+    'de' => 'DE',
+    'en-US' => 'EN',
+    'pt' => 'PT-BR'
+);
 
 // Icons.
 define('TEAM_B',        iconv('UCS-4LE', 'UTF-8', pack('V', 0x1F499)));

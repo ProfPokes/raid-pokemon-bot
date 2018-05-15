@@ -6,27 +6,28 @@ debug_log('raid_share()');
 //debug_log($update);
 //debug_log($data);
 
-// Check raid access.
-raid_access_check($update, $data);
+// Check quest access.
+quest_access_check($update, $data);
 
-// Get raid id.
+// Get quest id.
 $id = $data['id'];
 
 // Get chat id.
 $chat = $data['arg'];
 
-// Get raid data.
-$raid = get_raid($id);
+// Get quest data.
+$quest = get_quest($id);
 
 // Get text and keys.
-$text = show_raid_poll($raid);
-$keys = keys_vote($raid);
+$text = get_formatted_quest($quest, true, true, false, true);
+$keys = [];
 
 // Send location.
-if (RAID_LOCATION == true) {
+if (QUEST_LOCATION == true) {
     // Send location.
-    $msg_text = !empty($raid['address']) ? ($raid['address'] . ', R-ID = ' . $raid['id']) : ($raid['pokemon'] . ', ' . $raid['id']); // DO NOT REMOVE " R-ID = " --> NEEDED FOR CLEANUP PREPARATION!
-    $loc = send_venue($chat, $raid['lat'], $raid['lon'], '', $msg_text);
+    $msg_header = get_formatted_quest($quest, false, false, true, true);
+    $msg_text = !empty($quest['address']) ? $quest['address'] . ', Q-ID = ' . $quest['id'] : $quest['pokestop_name'] . ', ' . $quest['id']; // DO NOT REMOVE " Q-ID = " --> NEEDED FOR CLEANUP PREPARATION!
+    $loc = send_venue($chat, $quest['lat'], $quest['lon'], $msg_header, $msg_text);
 
     // Write to log.
     debug_log('location:');
