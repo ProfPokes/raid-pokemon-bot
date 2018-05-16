@@ -1,6 +1,6 @@
 # About
 
-Telegram bot for organizing raids and sharing quests in Pokemon Go. Developers are welcome to join https://t.me/RaidBotSupport
+Telegram bot for organizing raids and sharing quests in Pokemon Go. Developers are welcome to join https://t.me/PokemonBotSupport
 
 # Screenshots
 
